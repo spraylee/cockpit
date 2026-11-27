@@ -93,13 +93,18 @@ func TestProcessComposeLifecycle(t *testing.T) {
 	if preview.Note != "项目预览" || preview.Cwd != sandbox || len(preview.Command) != 4 || preview.Command[3] != argument {
 		t.Fatalf("missing process metadata: %+v", preview)
 	}
+	if table := run("list"); !strings.Contains(table, "DIR") || !strings.Contains(table, filepath.Base(sandbox)) {
+		t.Fatalf("list must show the working directory: %q", table)
+	}
 	if logs := run("logs", "preview"); !strings.Contains(logs, argument) {
 		t.Fatalf("argv did not reach program as-is: %q", logs)
 	}
 	if out, err := exec.Command(svc, "start", "preview", "--", "/bin/sh", "-c", "exit 1").CombinedOutput(); err == nil || !strings.Contains(string(out), "已存在") {
 		t.Fatalf("duplicate name must not replace service: %v\n%s", err, out)
 	}
-	run("stop", "preview")
+	if out := run("stop", "preview"); !strings.Contains(out, sandbox) {
+		t.Fatalf("stop must confirm which directory it acted on: %q", out)
+	}
 	until(t, func() bool {
 		items := list()
 		return len(items) == 2 && !items[0].Running && items[1].Running
@@ -146,6 +151,27 @@ func TestListenerFixture(t *testing.T) {
 	defer ln.Close()
 	fmt.Println(os.Args[3])
 	time.Sleep(20 * time.Second)
+}
+
+func TestShortDir(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]string{
+		"":                "-",
+		home:              "~",
+		home + "/code/me": "~/code/me",
+		"/tmp/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s": "…/r/s",
+	}
+	for in, want := range cases {
+		if got := shortDir(in); got != want {
+			t.Errorf("shortDir(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := shortDir("/tmp/svc/dir"); got != "/tmp/svc/dir" {
+		t.Errorf("short path should stay intact, got %q", got)
+	}
 }
 
 func TestBadInputDoesNotStartDaemon(t *testing.T) {

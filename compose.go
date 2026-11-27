@@ -280,12 +280,20 @@ func (m *manager) change(name string, config *processConfig) error {
 	project := struct {
 		Processes map[string]json.RawMessage
 	}{Processes: make(map[string]json.RawMessage, len(states)+1)}
+	dir := ""
+	if config != nil {
+		dir = config.WorkingDir
+	}
 	found := false
 	for _, state := range states {
 		if state.Name == name {
 			found = true
 			if config != nil {
 				return fmt.Errorf("服务 %q 已存在；用 svc start %s 启动原定义", name, name)
+			}
+			var mine processConfig
+			if err := m.call("GET", "/process/info/"+url.PathEscape(name), nil, &mine); err == nil {
+				dir = mine.WorkingDir
 			}
 			continue
 		}
@@ -313,7 +321,21 @@ func (m *manager) change(name string, config *processConfig) error {
 	if result[name] != want {
 		return fmt.Errorf("后台未确认 %s %q；执行 svc list 检查", want, name)
 	}
-	fmt.Printf("%s: %s\n", name, want)
+	fmt.Printf("%s: %s (%s)\n", want, name, shortDir(dir))
+	return nil
+}
+
+// Confirming the directory makes a stop verifiable: the name alone cannot tell
+// a caller that this is the project it meant to act on.
+func (m *manager) activate(label, method, path, name string) error {
+	var info processConfig
+	if err := m.call("GET", "/process/info/"+url.PathEscape(name), nil, &info); err != nil {
+		return err
+	}
+	if err := m.call(method, path, nil, nil); err != nil {
+		return err
+	}
+	fmt.Printf("%s: %s (%s)\n", label, name, shortDir(info.WorkingDir))
 	return nil
 }
 

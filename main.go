@@ -150,11 +150,11 @@ func run(args []string) error {
 		if newConfig != nil {
 			return m.change(name, newConfig)
 		}
-		return m.call("POST", "/process/start/"+key, nil, nil)
+		return m.activate("started", "POST", "/process/start/"+key, name)
 	case "stop":
-		return m.call("PATCH", "/process/stop/"+key, nil, nil)
+		return m.activate("stopped", "PATCH", "/process/stop/"+key, name)
 	case "restart":
-		return m.call("POST", "/process/restart/"+key, nil, nil)
+		return m.activate("restarted", "POST", "/process/restart/"+key, name)
 	case "rm":
 		return m.change(name, nil)
 	case "logs":
@@ -210,7 +210,7 @@ func printList(items []service, asJSON bool) error {
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tSTATUS\tAGE\tPORTS\tCOMMAND\tNOTE")
+	fmt.Fprintln(w, "NAME\tSTATUS\tAGE\tPORTS\tDIR\tCOMMAND\tNOTE")
 	for _, item := range items {
 		ports := make([]string, 0, len(item.TCP)+len(item.UDP))
 		for _, port := range item.TCP {
@@ -226,9 +226,39 @@ func printList(items []service, asJSON bool) error {
 				argv[i] = strconv.Quote(arg)
 			}
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", display(item.Name), item.Status, item.Age, strings.Join(ports, ","), strings.Join(argv, " "), display(item.Note))
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", display(item.Name), item.Status, item.Age, strings.Join(ports, ","), shortDir(item.Cwd), strings.Join(argv, " "), display(item.Note))
 	}
 	return w.Flush()
+}
+
+// The DIR column has to identify a project at a glance rather than show a
+// full path: a service without its directory cannot be safely stopped, and
+// full paths push COMMAND off narrow terminals. JSON keeps the exact path.
+func shortDir(dir string) string {
+	if dir == "" {
+		return "-"
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		switch {
+		case dir == home:
+			return "~"
+		case strings.HasPrefix(dir, home+string(os.PathSeparator)):
+			dir = "~" + dir[len(home):]
+		}
+	}
+	const budget = 34
+	runes := []rune(dir)
+	if len(runes) <= budget {
+		return dir
+	}
+	parts := strings.Split(dir, string(os.PathSeparator))
+	if len(parts) >= 2 {
+		tail := "…/" + strings.Join(parts[len(parts)-2:], string(os.PathSeparator))
+		if len([]rune(tail)) <= budget {
+			return tail
+		}
+	}
+	return "…" + string(runes[len(runes)-(budget-1):])
 }
 
 func display(s string) string {

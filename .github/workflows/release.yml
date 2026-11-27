@@ -1,0 +1,76 @@
+name: Test and release
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Install the pinned Process Compose release
+        shell: bash
+        run: |
+          set -euo pipefail
+          url=https://github.com/F1bonacc1/process-compose/releases/download/v1.124.0
+          archive="process-compose_$(go env GOOS)_$(go env GOARCH).tar.gz"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$url/$archive"
+          curl -fsSLO "$url/process-compose_checksums.txt"
+          awk -v name="$archive" '$2 == name {print; found++} END {if (found != 1) exit 1}' process-compose_checksums.txt > expected.sha256
+          shasum -a 256 -c expected.sha256
+          mkdir -p pc-bin
+          tar -xzf "$archive" -C pc-bin process-compose
+          echo "$RUNNER_TEMP/pc-bin" >> "$GITHUB_PATH"
+      - run: go vet ./...
+      - run: SVC_INTEGRATION=1 go test -v -timeout 90s ./...
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build native release archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          mkdir -p dist stage
+          for os in darwin linux; do
+            for arch in arm64 amd64; do
+              case "$os/$arch" in
+                darwin/arm64) triple=aarch64-apple-darwin ;;
+                darwin/amd64) triple=x86_64-apple-darwin ;;
+                linux/arm64) triple=aarch64-unknown-linux-gnu ;;
+                linux/amd64) triple=x86_64-unknown-linux-gnu ;;
+              esac
+              CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "-s -w -X main.version=$GITHUB_REF_NAME" -o stage/svc .
+              tar -czf "dist/svc-$GITHUB_REF_NAME-$triple.tar.gz" -C stage svc
+            done
+          done
+          cp scripts/install.sh dist/
+          (cd dist; sha256sum *.tar.gz install.sh > SHA256SUMS)
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes

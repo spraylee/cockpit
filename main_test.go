@@ -20,7 +20,7 @@ func TestProcessComposeLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A short path even when macOS TMPDIR or a CI checkout is deeply nested.
-	sandbox, err := os.MkdirTemp("/tmp", "svc-test-")
+	sandbox, err := os.MkdirTemp("/tmp", "cockpit-test-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestShortDir(t *testing.T) {
 			t.Errorf("shortDir(%q) = %q, want %q", in, got, want)
 		}
 	}
-	if got := shortDir("/tmp/svc/dir"); got != "/tmp/svc/dir" {
+	if got := shortDir("/tmp/cockpit/dir"); got != "/tmp/cockpit/dir" {
 		t.Errorf("short path should stay intact, got %q", got)
 	}
 }

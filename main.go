@@ -18,26 +18,27 @@ import (
 
 var version = "dev"
 
-const usage = `svc — 按需托管本机开发进程
+const usage = `cockpit — 按需托管本机开发进程（别名 ck）
 
-  svc up                                启动后台管理器（不启动旧任务）
-  svc start NAME [--note TEXT] -- CMD…   新增并启动，使用当前目录
-  svc start NAME                        启动已登记的服务
-  svc list [--json]                     查看状态、时长、端口、命令和备注
-  svc logs NAME                         查看最近 100 行日志
-  svc stop NAME                         停止，保留登记和日志
-  svc restart NAME                      重启已登记的服务
-  svc rm NAME                           停止并移除登记
-  svc ui                                打开 TUI；F10 或 Ctrl+C 只退出面板
-  svc down                              停止所有受管服务并退出后台管理器
-  svc --version                         显示版本
+  cockpit up                                启动后台管理器（不启动旧任务）
+  cockpit start NAME [--note TEXT] -- CMD…   新增并启动，使用当前目录
+  cockpit start NAME                        启动已登记的服务
+  cockpit list [--json]                     查看状态、时长、端口、目录、命令和备注
+  cockpit logs NAME                         查看最近 100 行日志
+  cockpit stop NAME                         停止，保留登记和日志
+  cockpit restart NAME                      重启已登记的服务
+  cockpit rm NAME                           停止并移除登记
+  cockpit ui                                打开 TUI；F10 或 Ctrl+C 只退出面板
+  cockpit down                              停止所有受管服务并退出后台管理器
+  cockpit update                            升级到最新版本
+  cockpit --version                         显示版本
 `
 
 var validName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "svc:", err)
+		fmt.Fprintln(os.Stderr, "cockpit:", err)
 		os.Exit(1)
 	}
 }
@@ -51,26 +52,32 @@ func run(args []string) error {
 		fmt.Println(version)
 		return nil
 	}
+	if args[0] == "update" {
+		if len(args) != 1 {
+			return errors.New("用法：cockpit update")
+		}
+		return updateSelf()
+	}
 
 	action, rest := args[0], args[1:]
 	switch action {
 	case "up", "down", "ui":
 		if len(rest) != 0 {
-			return fmt.Errorf("用法：svc %s", action)
+			return fmt.Errorf("用法：cockpit %s", action)
 		}
 	case "list":
 		if len(rest) != 0 && !slices.Equal(rest, []string{"--json"}) {
-			return errors.New("用法：svc list [--json]")
+			return errors.New("用法：cockpit list [--json]")
 		}
 	case "stop", "restart", "logs", "rm", "start":
 		if len(rest) == 0 || !validName.MatchString(rest[0]) {
 			return errors.New("服务名须以字母或数字开头，只允许字母、数字、点、下划线和连字符，最多 64 字符")
 		}
 		if action != "start" && len(rest) != 1 {
-			return fmt.Errorf("用法：svc %s NAME", action)
+			return fmt.Errorf("用法：cockpit %s NAME", action)
 		}
 	default:
-		return fmt.Errorf("未知命令 %q；查看 svc --help", action)
+		return fmt.Errorf("未知命令 %q；查看 cockpit --help", action)
 	}
 
 	var newConfig *processConfig
@@ -122,7 +129,7 @@ func run(args []string) error {
 		case "down":
 			return nil
 		default:
-			return errors.New("后台未运行；先执行 svc up，或用 svc start NAME -- CMD 新建服务")
+			return errors.New("后台未运行；先执行 cockpit up，或用 cockpit start NAME -- CMD 新建服务")
 		}
 	}
 
@@ -175,7 +182,7 @@ func startConfig(name string, args []string) (*processConfig, error) {
 		note, args = args[1], args[2:]
 	}
 	if len(args) < 2 || args[0] != "--" {
-		return nil, errors.New("用法：svc start NAME [--note TEXT] -- CMD [ARGS…]")
+		return nil, errors.New("用法：cockpit start NAME [--note TEXT] -- CMD [ARGS…]")
 	}
 	argv := args[1:]
 	bin, err := exec.LookPath(argv[0])

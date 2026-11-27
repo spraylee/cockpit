@@ -19,8 +19,8 @@ import (
 	"time"
 )
 
-const projectName = "spraylee-svc"
-const emptyProject = "name: spraylee-svc\nversion: '0.5'\nprocesses: {}\n"
+const projectName = "cockpit"
+const emptyProject = "name: cockpit\nversion: '0.5'\nprocesses: {}\n"
 
 // Field names match the Process Compose 1.124 API, not its YAML keys.
 type processConfig struct {
@@ -65,21 +65,21 @@ type manager struct {
 }
 
 func newManager() (*manager, error) {
-	dir := os.Getenv("SVC_HOME")
+	dir := os.Getenv("COCKPIT_HOME")
 	if dir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return nil, err
 		}
-		dir = filepath.Join(home, ".spraylee-svc")
+		dir = filepath.Join(home, ".cockpit")
 	}
 	if !filepath.IsAbs(dir) {
-		return nil, errors.New("SVC_HOME 必须是绝对路径")
+		return nil, errors.New("COCKPIT_HOME 必须是绝对路径")
 	}
 	dir = filepath.Clean(dir)
 	socket := filepath.Join(dir, "control.sock")
 	if len(socket) >= 104 {
-		return nil, errors.New("Unix socket 路径过长；请将 SVC_HOME 指向更短的私有目录")
+		return nil, errors.New("Unix socket 路径过长；请将 COCKPIT_HOME 指向更短的私有目录")
 	}
 	m := &manager{dir: dir, socket: socket}
 	m.client = &http.Client{
@@ -289,7 +289,7 @@ func (m *manager) change(name string, config *processConfig) error {
 		if state.Name == name {
 			found = true
 			if config != nil {
-				return fmt.Errorf("服务 %q 已存在；用 svc start %s 启动原定义", name, name)
+				return fmt.Errorf("服务 %q 已存在；用 cockpit start %s 启动原定义", name, name)
 			}
 			var mine processConfig
 			if err := m.call("GET", "/process/info/"+url.PathEscape(name), nil, &mine); err == nil {
@@ -319,7 +319,7 @@ func (m *manager) change(name string, config *processConfig) error {
 		return err
 	}
 	if result[name] != want {
-		return fmt.Errorf("后台未确认 %s %q；执行 svc list 检查", want, name)
+		return fmt.Errorf("后台未确认 %s %q；执行 cockpit list 检查", want, name)
 	}
 	fmt.Printf("%s: %s (%s)\n", want, name, shortDir(dir))
 	return nil

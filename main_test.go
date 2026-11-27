@@ -13,8 +13,8 @@ import (
 )
 
 func TestProcessComposeLifecycle(t *testing.T) {
-	if os.Getenv("SVC_INTEGRATION") != "1" {
-		t.Skip("set SVC_INTEGRATION=1 to test with the real process-compose binary")
+	if os.Getenv("COCKPIT_INTEGRATION") != "1" {
+		t.Skip("set COCKPIT_INTEGRATION=1 to test with the real process-compose binary")
 	}
 	if _, err := exec.LookPath("process-compose"); err != nil {
 		t.Fatal(err)
@@ -25,18 +25,18 @@ func TestProcessComposeLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(sandbox) })
-	t.Setenv("SVC_HOME", filepath.Join(sandbox, "state"))
-	svc := filepath.Join(sandbox, "svc")
-	if b, err := exec.Command("go", "build", "-o", svc, ".").CombinedOutput(); err != nil {
+	t.Setenv("COCKPIT_HOME", filepath.Join(sandbox, "state"))
+	cockpit := filepath.Join(sandbox, "cockpit")
+	if b, err := exec.Command("go", "build", "-o", cockpit, ".").CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, b)
 	}
 	run := func(args ...string) string {
 		t.Helper()
-		cmd := exec.Command(svc, args...)
+		cmd := exec.Command(cockpit, args...)
 		cmd.Dir = sandbox
 		b, err := cmd.CombinedOutput()
 		if err != nil {
-			t.Fatalf("svc %q: %v\n%s", args, err, b)
+			t.Fatalf("cockpit %q: %v\n%s", args, err, b)
 		}
 		return string(b)
 	}
@@ -44,10 +44,10 @@ func TestProcessComposeLifecycle(t *testing.T) {
 	if out := run("list", "--json"); out != "[]\n" {
 		t.Fatalf("empty list = %q", out)
 	}
-	if _, err := os.Stat(os.Getenv("SVC_HOME")); !os.IsNotExist(err) {
+	if _, err := os.Stat(os.Getenv("COCKPIT_HOME")); !os.IsNotExist(err) {
 		t.Fatalf("list unexpectedly created state: %v", err)
 	}
-	if out, err := exec.Command(svc, "ui").CombinedOutput(); err == nil || !strings.Contains(string(out), "后台未运行") {
+	if out, err := exec.Command(cockpit, "ui").CombinedOutput(); err == nil || !strings.Contains(string(out), "后台未运行") {
 		t.Fatalf("ui should not start the daemon: %v\n%s", err, out)
 	}
 
@@ -56,8 +56,8 @@ func TestProcessComposeLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	argument := `with spaces and "quotes" and $literal`
-	a := exec.Command(svc, "start", "preview", "--note", "项目预览", "--", fixture, "-test.run=^TestListenerFixture$", "--", argument)
-	b := exec.Command(svc, "start", "watchdog", "--", "/bin/sleep", "20")
+	a := exec.Command(cockpit, "start", "preview", "--note", "项目预览", "--", fixture, "-test.run=^TestListenerFixture$", "--", argument)
+	b := exec.Command(cockpit, "start", "watchdog", "--", "/bin/sleep", "20")
 	a.Dir, b.Dir = sandbox, sandbox
 	first := make(chan error, 1)
 	go func() {
@@ -99,7 +99,7 @@ func TestProcessComposeLifecycle(t *testing.T) {
 	if logs := run("logs", "preview"); !strings.Contains(logs, argument) {
 		t.Fatalf("argv did not reach program as-is: %q", logs)
 	}
-	if out, err := exec.Command(svc, "start", "preview", "--", "/bin/sh", "-c", "exit 1").CombinedOutput(); err == nil || !strings.Contains(string(out), "已存在") {
+	if out, err := exec.Command(cockpit, "start", "preview", "--", "/bin/sh", "-c", "exit 1").CombinedOutput(); err == nil || !strings.Contains(string(out), "已存在") {
 		t.Fatalf("duplicate name must not replace service: %v\n%s", err, out)
 	}
 	if out := run("stop", "preview"); !strings.Contains(out, sandbox) {
@@ -176,10 +176,42 @@ func TestShortDir(t *testing.T) {
 
 func TestBadInputDoesNotStartDaemon(t *testing.T) {
 	dir := filepath.Join(os.TempDir(), "not-used-because-input-is-invalid")
-	t.Setenv("SVC_HOME", dir)
+	t.Setenv("COCKPIT_HOME", dir)
 	for _, args := range [][]string{{"start", "../foreign", "--", "sleep", "1"}, {"start", "foo", "sleep", "1"}, {"down", "all"}} {
 		if err := run(args); err == nil {
 			t.Fatalf("accepted invalid argv: %q", args)
 		}
+	}
+}
+
+func TestVersionCompare(t *testing.T) {
+	cases := []struct {
+		latest, current string
+		newer           bool
+	}{
+		{"v0.3.0", "v0.2.9", true},
+		{"v0.2.1", "v0.2.0", true},
+		{"v0.2.0", "v0.2.0", false},
+		{"v0.1.9", "v0.2.0", false},
+		{"v1.0.0", "v0.99.99", true},
+		{"v0.2.0", "dev", true},
+	}
+	for _, c := range cases {
+		if got := isNewer(c.latest, c.current); got != c.newer {
+			t.Errorf("isNewer(%q, %q) = %v, want %v", c.latest, c.current, got, c.newer)
+		}
+	}
+}
+
+func TestChecksumFor(t *testing.T) {
+	sums := "aaa  cockpit-v0.2.0-aarch64-apple-darwin.tar.gz\nBBB *cockpit-v0.2.0-x86_64-apple-darwin.tar.gz\n"
+	if got, err := checksumFor(sums, "cockpit-v0.2.0-aarch64-apple-darwin.tar.gz"); err != nil || got != "aaa" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	if got, err := checksumFor(sums, "cockpit-v0.2.0-x86_64-apple-darwin.tar.gz"); err != nil || got != "bbb" {
+		t.Fatalf("binary-mode marker not handled: %q, %v", got, err)
+	}
+	if _, err := checksumFor(sums, "cockpit-v0.2.0-linux.tar.gz"); err == nil {
+		t.Fatal("missing asset should fail")
 	}
 }

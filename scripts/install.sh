@@ -29,7 +29,10 @@ fi
 
 work=$(mktemp -d)
 staged=''
-cleanup() { rm -rf "$work"; [ -n "$staged" ] && rm -f "$staged"; }
+cleanup() {
+  rm -rf "$work"
+  if [ -n "$staged" ]; then rm -f "$staged"; fi
+}
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
@@ -71,3 +74,4 @@ fi
 if ! command -v process-compose >/dev/null; then
   echo 'cockpit is installed. Install process-compose 1.124+ before starting a service.'
 fi
+exit 0

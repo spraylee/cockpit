@@ -6,7 +6,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+
 	"errors"
 	"fmt"
 	"io"
@@ -56,15 +56,9 @@ func updateSelf() error {
 	}
 
 	client := &http.Client{Timeout: 60 * time.Second}
-	var release struct {
-		TagName string `json:"tag_name"`
-	}
-	if err := fetchJSON(client, "https://api.github.com/repos/"+releasesRepo+"/releases/latest", &release); err != nil {
-		return fmt.Errorf("查询最新版本失败：%w", err)
-	}
-	latest := release.TagName
-	if latest == "" {
-		return errors.New("最新版本信息为空")
+	latest, err := latestTag(client)
+	if err != nil {
+		return err
 	}
 	if !isNewer(latest, version) {
 		fmt.Printf("已是最新版本 %s\n", version)
@@ -119,6 +113,39 @@ func updateSelf() error {
 	return nil
 }
 
+// latestTag reads the tag from the /releases/latest redirect instead of the
+// API: unauthenticated API calls share a 60/hour limit per IP and start
+// returning 403 on busy networks, which made updates fail for no good reason.
+func latestTag(client *http.Client) (string, error) {
+	noRedirect := &http.Client{
+		Timeout: client.Timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	req, err := http.NewRequest(http.MethodHead, "https://github.com/"+releasesRepo+"/releases/latest", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "cockpit/"+version)
+	resp, err := noRedirect.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("查询最新版本失败：%w", err)
+	}
+	resp.Body.Close()
+	location := resp.Header.Get("Location")
+	const marker = "/releases/tag/"
+	i := strings.LastIndex(location, marker)
+	if i < 0 {
+		return "", fmt.Errorf("查询最新版本失败：%s 未指向发布页（%s）", resp.Status, location)
+	}
+	tag := location[i+len(marker):]
+	if tag == "" {
+		return "", errors.New("最新版本信息为空")
+	}
+	return tag, nil
+}
+
 func fetchBytes(client *http.Client, url string) ([]byte, error) {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -134,14 +161,6 @@ func fetchBytes(client *http.Client, url string) ([]byte, error) {
 		return nil, fmt.Errorf("%s：%s", url, resp.Status)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, maxDownload))
-}
-
-func fetchJSON(client *http.Client, url string, out any) error {
-	body, err := fetchBytes(client, url)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(body, out)
 }
 
 // SHA256SUMS lines are "<hash>  <file>" or "<hash> *<file>".
